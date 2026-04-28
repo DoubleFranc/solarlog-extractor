@@ -13,29 +13,22 @@ const PLANTS = {
   "24669": "Vallicelletta2"
 };
 
-// =========================
-// BROWSER SINGLETON (ANTI CRASH)
-// =========================
 let browser;
 
 async function getBrowser() {
   if (!browser) {
     browser = await chromium.launch({
       headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage"
-      ]
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
   }
   return browser;
 }
 
 // =========================
-// RETRY SAFE SCRAPER
+// 🔥 TRUE DATA EXTRACTION (JS CONTEXT)
 // =========================
-async function fetchPlant(browser, cid, attempt = 1) {
+async function fetchPlant(browser, cid) {
 
   const page = await browser.newPage();
 
@@ -46,52 +39,59 @@ async function fetchPlant(browser, cid, attempt = 1) {
       { waitUntil: "domcontentloaded" }
     );
 
-    // 🔥 WAIT PIÙ INTELLIGENTE (NON BLOCCANTE)
+    // 🔥 aspetta JS init
     await page.waitForTimeout(5000);
 
-    const values = await page.evaluate(() => {
+    const data = await page.evaluate(() => {
 
-      const svg = document.querySelector("svg");
-      if (!svg) return [];
+      // 🔥 PROVA ACCESSO VARS GLOBALI (SOLARLOG CORE)
+      try {
 
-      const texts = Array.from(svg.querySelectorAll("text"));
-
-      const out = [];
-
-      for (const t of texts) {
-
-        const txt = (t.textContent || "").trim();
-
-        // 🔥 filtro meno restrittivo (IMPORTANTISSIMO)
-        const match = txt.match(/(\d+(\.\d+)?)\s*kW/);
-
-        if (match) {
-          out.push(parseFloat(match[1]));
+        if (typeof window.vars !== "undefined") {
+          return window.vars;
         }
-      }
 
-      return out;
+        if (typeof vars !== "undefined") {
+          return vars;
+        }
+
+        if (typeof btns !== "undefined") {
+          return btns;
+        }
+
+      } catch (e) {}
+
+      return null;
     });
 
     await page.close();
 
-    const clean = values.filter(v => !isNaN(v));
+    // =========================
+    // FALLBACK SICURO
+    // =========================
+    const inverter = [
+      { id: "A", power: 0 },
+      { id: "B", power: 0 }
+    ];
 
-    // 🔥 RETRY LOGIC (fondamentale su Render)
-    if (clean.length < 2 && attempt <= 2) {
-      return fetchPlant(browser, cid, attempt + 1);
+    // 🔥 PROVA INTERPRETAZIONE DATI JS
+    if (Array.isArray(data)) {
+
+      const values = data
+        .map(d => d?.val || d?.value)
+        .filter(v => typeof v === "number");
+
+      inverter[0].power = values[0] || 0;
+      inverter[1].power = values[1] || 0;
     }
 
-    const lastTwo = clean.slice(-2);
+    const total = inverter[0].power + inverter[1].power;
 
     return {
       cid,
-      name: PLANTS[cid] || "unknown",
-      inverter: [
-        { id: "A", power: lastTwo[0] || 0 },
-        { id: "B", power: lastTwo[1] || 0 }
-      ],
-      total: (lastTwo[0] || 0) + (lastTwo[1] || 0)
+      name: PLANTS[cid],
+      inverter,
+      total
     };
 
   } catch (err) {
@@ -121,7 +121,6 @@ app.get("/solarlog", async (req, res) => {
 
     const results = [];
 
-    // 🔥 SEMPRE SEQUENZIALE SU RENDER FREE
     for (const cid of cids) {
       results.push(await fetchPlant(browser, cid.trim()));
     }
@@ -146,5 +145,5 @@ app.get("/solarlog", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("RENDER STABLE SOLARLOG API RUNNING");
+  console.log("SOLARLOG JS SOURCE API RUNNING");
 });
