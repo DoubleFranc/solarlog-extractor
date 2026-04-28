@@ -21,62 +21,33 @@ app.get("/solarlog", async (req, res) => {
 
     const page = await browser.newPage();
 
-    const responses = [];
-
-    // =========================
-    // LISTENER AGGRESSIVO (FIX DEFINITIVO)
-    // =========================
-    page.on("response", async (response) => {
-      try {
-
-        const url = response.url();
-
-        let text = "";
-
-        try {
-          text = await response.text();
-        } catch {
-          return;
-        }
-
-        // 🔥 cattura tutto ciò che contiene dati energetici
-        if (
-          text.includes("kW") ||
-          text.includes("kwh") ||
-          text.includes("power") ||
-          text.includes("W") ||
-          /\d+\.\d+\s*kW/.test(text)
-        ) {
-          responses.push({
-            url,
-            snippet: text.substring(0, 1500)
-          });
-        }
-
-      } catch {}
-    });
-
-    // =========================
-    // NAVIGAZIONE SOLARLOG
-    // =========================
     await page.goto(
       `https://emmest.solarlog-portal.it/sds/module/solarlogweb/Statistik.php?c=${cid}`,
       { waitUntil: "networkidle" }
     );
 
-    // lascia eseguire svg.js + fetch interni
+    // 🔥 ASPETTA RENDER COMPLETO SVG + JS
     await page.waitForTimeout(8000);
+
+    // =========================
+    // DOM EXTRACTION (QUI STA LA SOLUZIONE)
+    // =========================
+    const result = await page.evaluate(() => {
+
+      const text = document.body.innerText || "";
+
+      // estrai tutti i numeri kW visibili nel DOM
+      const matches = text.match(/\d+(\.\d+)?\s?kW/g) || [];
+
+      return matches;
+    });
 
     await browser.close();
 
-    // =========================
-    // RISPOSTA
-    // =========================
     return res.json({
       plant: cid,
       timestamp: Date.now(),
-      calls_found: responses.length,
-      data: responses
+      values_found: result
     });
 
   } catch (err) {
@@ -93,5 +64,5 @@ app.get("/solarlog", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("SolarLog extractor running on port " + PORT);
+  console.log("running");
 });
