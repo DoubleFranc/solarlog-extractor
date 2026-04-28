@@ -17,7 +17,7 @@ const PLANTS = {
 };
 
 // =========================
-// SCRAPER SINGOLO IMPIANTO
+// SCRAPER IMPIANTO
 // =========================
 async function fetchPlant(browser, cid) {
 
@@ -31,7 +31,7 @@ async function fetchPlant(browser, cid) {
     );
 
     // =========================
-    // WAIT CORRETTO (TEXT NODE SVG)
+    // WAIT INTELLIGENTE SVG READY
     // =========================
     await page.waitForFunction(() => {
 
@@ -47,7 +47,7 @@ async function fetchPlant(browser, cid) {
     }, { timeout: 25000 });
 
     // =========================
-    // ESTRAZIONE ROBUSTA
+    // ESTRAZIONE ROBUSTA INVERTER
     // =========================
     const values = await page.evaluate(() => {
 
@@ -59,8 +59,17 @@ async function fetchPlant(browser, cid) {
       const out = [];
 
       for (const t of texts) {
-        const match = t.textContent?.match(/(\d+(\.\d+)?)\s*kW/);
-        if (match) out.push(parseFloat(match[1]));
+
+        const txt = (t.textContent || "").trim();
+
+        // filtro intelligente: solo inverter labels
+        if (
+          txt.includes("S0-IN") ||
+          txt.toUpperCase().includes("INVERTER")
+        ) {
+          const match = txt.match(/(\d+(\.\d+)?)\s*kW/);
+          if (match) out.push(parseFloat(match[1]));
+        }
       }
 
       return out;
@@ -69,7 +78,7 @@ async function fetchPlant(browser, cid) {
     await page.close();
 
     // =========================
-    // PULIZIA
+    // VALIDAZIONE
     // =========================
     const clean = values.filter(v => !isNaN(v));
 
@@ -118,11 +127,9 @@ app.get("/solarlog", async (req, res) => {
 
   try {
 
-    // =========================
-    // MULTI / SINGLE / ALL
-    // =========================
     let cids = req.query.cid;
 
+    // default = tutti impianti
     if (!cids || cids.trim() === "") {
       cids = Object.keys(PLANTS);
     } else {
@@ -142,9 +149,6 @@ app.get("/solarlog", async (req, res) => {
 
     await browser.close();
 
-    // =========================
-    // TOTALE GLOBALE
-    // =========================
     const globalTotal = results.reduce((sum, p) => {
       return sum + (p.total || 0);
     }, 0);
@@ -172,5 +176,5 @@ app.get("/solarlog", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("SolarLog FINAL STABLE API running");
+  console.log("SolarLog FINAL API running");
 });
