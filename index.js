@@ -14,7 +14,7 @@ const PLANTS = {
 };
 
 // =========================
-// BROWSER SINGLETON (CRUCIALE)
+// BROWSER SINGLETON (ANTI CRASH)
 // =========================
 let browser;
 
@@ -22,16 +22,20 @@ async function getBrowser() {
   if (!browser) {
     browser = await chromium.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage"
+      ]
     });
   }
   return browser;
 }
 
 // =========================
-// SCRAPER SAFE (NO MEMORY SPIKE)
+// RETRY SAFE SCRAPER
 // =========================
-async function fetchPlant(browser, cid) {
+async function fetchPlant(browser, cid, attempt = 1) {
 
   const page = await browser.newPage();
 
@@ -42,7 +46,8 @@ async function fetchPlant(browser, cid) {
       { waitUntil: "domcontentloaded" }
     );
 
-    await page.waitForTimeout(3000);
+    // 🔥 WAIT PIÙ INTELLIGENTE (NON BLOCCANTE)
+    await page.waitForTimeout(5000);
 
     const values = await page.evaluate(() => {
 
@@ -54,11 +59,14 @@ async function fetchPlant(browser, cid) {
       const out = [];
 
       for (const t of texts) {
-        const txt = t.textContent || "";
 
-        if (txt.includes("S0-IN") || txt.includes("INVERTER")) {
-          const m = txt.match(/(\d+(\.\d+)?)\s*kW/);
-          if (m) out.push(parseFloat(m[1]));
+        const txt = (t.textContent || "").trim();
+
+        // 🔥 filtro meno restrittivo (IMPORTANTISSIMO)
+        const match = txt.match(/(\d+(\.\d+)?)\s*kW/);
+
+        if (match) {
+          out.push(parseFloat(match[1]));
         }
       }
 
@@ -69,10 +77,16 @@ async function fetchPlant(browser, cid) {
 
     const clean = values.filter(v => !isNaN(v));
 
+    // 🔥 RETRY LOGIC (fondamentale su Render)
+    if (clean.length < 2 && attempt <= 2) {
+      return fetchPlant(browser, cid, attempt + 1);
+    }
+
     const lastTwo = clean.slice(-2);
 
     return {
       cid,
+      name: PLANTS[cid] || "unknown",
       inverter: [
         { id: "A", power: lastTwo[0] || 0 },
         { id: "B", power: lastTwo[1] || 0 }
@@ -107,7 +121,7 @@ app.get("/solarlog", async (req, res) => {
 
     const results = [];
 
-    // 🔥 IMPORTANT: sequenziale (NO PARALLEL)
+    // 🔥 SEMPRE SEQUENZIALE SU RENDER FREE
     for (const cid of cids) {
       results.push(await fetchPlant(browser, cid.trim()));
     }
@@ -121,6 +135,7 @@ app.get("/solarlog", async (req, res) => {
     });
 
   } catch (err) {
+
     return res.json({
       error: "runtime_error",
       message: err.message
@@ -131,5 +146,5 @@ app.get("/solarlog", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("MEMORY SAFE API RUNNING");
+  console.log("RENDER STABLE SOLARLOG API RUNNING");
 });
