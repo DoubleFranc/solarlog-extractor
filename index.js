@@ -30,10 +30,22 @@ async function fetchPlant(browser, cid) {
       { waitUntil: "networkidle" }
     );
 
-    await page.waitForTimeout(8000);
+    // =========================
+    // 🔥 WAIT INTELLIGENTE (NON TIMEOUT FISSO)
+    // =========================
+    await page.waitForFunction(() => {
+
+      const svg = document.querySelector("svg");
+      if (!svg) return false;
+
+      const text = svg.innerHTML || "";
+
+      return /\d+(\.\d+)?\s*kW/.test(text);
+
+    }, { timeout: 20000 });
 
     // =========================
-    // 🔥 ESTRAZIONE CORRETTA (LABEL + VALORE)
+    // 🔥 ESTRAZIONE SICURA
     // =========================
     const values = await page.evaluate(() => {
 
@@ -42,27 +54,18 @@ async function fetchPlant(browser, cid) {
 
       const text = svg.innerHTML;
 
-      // 🔥 prende SOLO pattern inverter reali (S0-IN / INVERTER / ecc.)
-      const regex = /(S0-IN[^<]{0,50}?)(\d{2}:\d{2})[^0-9]*([0-9]+(\.[0-9]+)?)\s*kW/g;
+      const matches = [...text.matchAll(/(\d+(\.\d+)?)\s*kW/g)];
 
-      const results = [];
-      let match;
-
-      while ((match = regex.exec(text)) !== null) {
-        results.push(parseFloat(match[3]));
-      }
-
-      return results;
+      return matches.map(m => parseFloat(m[1]));
     });
 
     await page.close();
 
     // =========================
-    // PULIZIA DATI
+    // PULIZIA
     // =========================
     const clean = values.filter(v => !isNaN(v));
 
-    // fallback sicurezza
     if (clean.length < 2) {
       return {
         cid,
@@ -108,11 +111,11 @@ app.get("/solarlog", async (req, res) => {
 
   try {
 
-    // =========================
-    // FIX: DEFAULT = TUTTI GLI IMPIANTI
-    // =========================
     let cids = req.query.cid;
 
+    // =========================
+    // DEFAULT = TUTTI IMPIANTI
+    // =========================
     if (!cids || cids.trim() === "") {
       cids = Object.keys(PLANTS);
     } else {
@@ -126,15 +129,15 @@ app.get("/solarlog", async (req, res) => {
 
     const results = [];
 
+    // sequenziale stabile (Render-safe)
     for (const cid of cids) {
-      const data = await fetchPlant(browser, cid.trim());
-      results.push(data);
+      results.push(await fetchPlant(browser, cid.trim()));
     }
 
     await browser.close();
 
     // =========================
-    // TOTALE GENERALE
+    // TOTALE GLOBALE
     // =========================
     const globalTotal = results.reduce((sum, p) => {
       return sum + (p.total || 0);
@@ -158,10 +161,10 @@ app.get("/solarlog", async (req, res) => {
 });
 
 // =========================
-// SERVER START
+// START SERVER
 // =========================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("SolarLog API FIXED running on port " + PORT);
+  console.log("SolarLog Stable API running");
 });
