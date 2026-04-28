@@ -3,7 +3,6 @@ import { chromium } from "playwright";
 
 const app = express();
 
-// endpoint principale
 app.get("/solarlog", async (req, res) => {
 
   const cid = req.query.cid;
@@ -15,56 +14,64 @@ app.get("/solarlog", async (req, res) => {
   let browser;
 
   try {
+
     browser = await chromium.launch({
-      args: ["--no-sandbox"]
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
     const page = await browser.newPage();
 
-    let responses = [];
+    const responses = [];
 
-    // intercetta tutte le risposte di rete
+    // =========================
+    // LISTENER AGGRESSIVO (FIX DEFINITIVO)
+    // =========================
     page.on("response", async (response) => {
       try {
-       const url = response.url();
-const ct = response.headers()["content-type"] || "";
 
-// 🔥 intercetta solo chiamate utili reali
-if (
-  ct.includes("json") ||
-  url.includes("ajax") ||
-  url.includes("Get") ||
-  url.includes("Data") ||
-  url.includes("Realtime") ||
-  url.includes("chart")
-) {
-  const text = await response.text();
+        const url = response.url();
 
-  if (
-    text.includes("kW") ||
-    text.includes("power") ||
-    text.includes("W")
-  ) {
-    responses.push({
-      url,
-      snippet: text.substring(0, 800)
-    });
-  }
-}
+        let text = "";
+
+        try {
+          text = await response.text();
+        } catch {
+          return;
+        }
+
+        // 🔥 cattura tutto ciò che contiene dati energetici
+        if (
+          text.includes("kW") ||
+          text.includes("kwh") ||
+          text.includes("power") ||
+          text.includes("W") ||
+          /\d+\.\d+\s*kW/.test(text)
+        ) {
+          responses.push({
+            url,
+            snippet: text.substring(0, 1500)
+          });
+        }
+
       } catch {}
     });
 
-    // vai alla pagina SolarLog
+    // =========================
+    // NAVIGAZIONE SOLARLOG
+    // =========================
     await page.goto(
       `https://emmest.solarlog-portal.it/sds/module/solarlogweb/Statistik.php?c=${cid}`,
       { waitUntil: "networkidle" }
     );
 
-    // aspetta esecuzione JS
-    await page.waitForTimeout(6000);
+    // lascia eseguire svg.js + fetch interni
+    await page.waitForTimeout(8000);
 
     await browser.close();
 
+    // =========================
+    // RISPOSTA
+    // =========================
     return res.json({
       plant: cid,
       timestamp: Date.now(),
@@ -83,9 +90,8 @@ if (
   }
 });
 
-// porta (Render la imposta automaticamente)
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log("SolarLog extractor running on port " + PORT);
 });
