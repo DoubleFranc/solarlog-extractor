@@ -17,7 +17,7 @@ const PLANTS = {
 };
 
 // =========================
-// FUNZIONE SCRAPING SINGOLO IMPIANTO
+// SCRAPING SINGOLO IMPIANTO
 // =========================
 async function fetchPlant(browser, cid) {
 
@@ -67,6 +67,7 @@ async function fetchPlant(browser, cid) {
     };
 
   } catch (err) {
+
     await page.close();
 
     return {
@@ -85,13 +86,16 @@ app.get("/solarlog", async (req, res) => {
 
   try {
 
-  let cids = req.query.cid;
+    // =========================
+    // FIX: DEFAULT = TUTTI IMPIANTI
+    // =========================
+    let cids = req.query.cid;
 
-if (!cids || cids.trim() === "") {
-  cids = Object.keys(PLANTS);
-} else {
-  cids = cids.split(",");
-}
+    if (!cids || cids.trim() === "") {
+      cids = Object.keys(PLANTS);
+    } else {
+      cids = cids.split(",");
+    }
 
     browser = await chromium.launch({
       headless: true,
@@ -132,8 +136,11 @@ if (!cids || cids.trim() === "") {
   }
 });
 
+// =========================
+// START SERVER
+// =========================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Multi SolarLog API running");
+  console.log("SolarLog Multi API running on port " + PORT);
 });
