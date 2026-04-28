@@ -26,7 +26,7 @@ async function getBrowser() {
 }
 
 // =========================
-// 🔥 TRUE DATA EXTRACTION (JS CONTEXT)
+// 🔥 REAL SOURCE INTERCEPT (JS HOOKING)
 // =========================
 async function fetchPlant(browser, cid) {
 
@@ -34,55 +34,59 @@ async function fetchPlant(browser, cid) {
 
   try {
 
+    const values = [];
+
+    // 🔥 INTERCEPT JS FUNCTIONS BEFORE PAGE RUNS
+    await page.addInitScript(() => {
+
+      window.__solarlog_data = [];
+
+      const originalSetVar = window.setVar;
+
+      if (originalSetVar) {
+        window.setVar = function (...args) {
+
+          try {
+            window.__solarlog_data.push(args);
+          } catch (e) {}
+
+          return originalSetVar.apply(this, args);
+        };
+      }
+
+    });
+
     await page.goto(
       `https://emmest.solarlog-portal.it/sds/module/solarlogweb/Statistik.php?c=${cid}`,
       { waitUntil: "domcontentloaded" }
     );
 
-    // 🔥 aspetta JS init
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(6000);
 
-    const data = await page.evaluate(() => {
-
-      // 🔥 PROVA ACCESSO VARS GLOBALI (SOLARLOG CORE)
-      try {
-
-        if (typeof window.vars !== "undefined") {
-          return window.vars;
-        }
-
-        if (typeof vars !== "undefined") {
-          return vars;
-        }
-
-        if (typeof btns !== "undefined") {
-          return btns;
-        }
-
-      } catch (e) {}
-
-      return null;
-    });
+    const data = await page.evaluate(() => window.__solarlog_data || []);
 
     await page.close();
 
     // =========================
-    // FALLBACK SICURO
+    // PARSING REAL DATA STREAM
     // =========================
     const inverter = [
       { id: "A", power: 0 },
       { id: "B", power: 0 }
     ];
 
-    // 🔥 PROVA INTERPRETAZIONE DATI JS
-    if (Array.isArray(data)) {
+    for (const d of data) {
 
-      const values = data
-        .map(d => d?.val || d?.value)
-        .filter(v => typeof v === "number");
+      // tipico: setVar('inv', 2)
+      if (Array.isArray(d)) {
 
-      inverter[0].power = values[0] || 0;
-      inverter[1].power = values[1] || 0;
+        const val = d.find(v => typeof v === "number");
+
+        if (val !== undefined) {
+          if (inverter[0].power === 0) inverter[0].power = val;
+          else inverter[1].power = val;
+        }
+      }
     }
 
     const total = inverter[0].power + inverter[1].power;
@@ -145,5 +149,5 @@ app.get("/solarlog", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("SOLARLOG JS SOURCE API RUNNING");
+  console.log("SOLARLOG INTERCEPT ENGINE RUNNING");
 });
