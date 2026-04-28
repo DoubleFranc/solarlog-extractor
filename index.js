@@ -7,11 +7,11 @@ const app = express();
 // IMPIANTI
 // =========================
 const PLANTS = {
-  "24563": "Nord",
-  "24490": "Centro",
-  "24486": "Sud",
   "24468": "Villetta",
   "24474": "Villetta2",
+  "24486": "Sud",
+  "24490": "Centro",
+  "24563": "Nord",
   "24655": "Vallicelletta",
   "24669": "Vallicelletta2"
 };
@@ -31,32 +31,39 @@ async function fetchPlant(browser, cid) {
     );
 
     // =========================
-    // 🔥 WAIT INTELLIGENTE (NON TIMEOUT FISSO)
+    // WAIT CORRETTO (TEXT NODE SVG)
     // =========================
     await page.waitForFunction(() => {
 
       const svg = document.querySelector("svg");
       if (!svg) return false;
 
-      const text = svg.innerHTML || "";
+      const texts = Array.from(svg.querySelectorAll("text"));
 
-      return /\d+(\.\d+)?\s*kW/.test(text);
+      return texts.some(t =>
+        /\d+(\.\d+)?\s*kW/.test(t.textContent || "")
+      );
 
-    }, { timeout: 20000 });
+    }, { timeout: 25000 });
 
     // =========================
-    // 🔥 ESTRAZIONE SICURA
+    // ESTRAZIONE ROBUSTA
     // =========================
     const values = await page.evaluate(() => {
 
       const svg = document.querySelector("svg");
       if (!svg) return [];
 
-      const text = svg.innerHTML;
+      const texts = Array.from(svg.querySelectorAll("text"));
 
-      const matches = [...text.matchAll(/(\d+(\.\d+)?)\s*kW/g)];
+      const out = [];
 
-      return matches.map(m => parseFloat(m[1]));
+      for (const t of texts) {
+        const match = t.textContent?.match(/(\d+(\.\d+)?)\s*kW/);
+        if (match) out.push(parseFloat(match[1]));
+      }
+
+      return out;
     });
 
     await page.close();
@@ -111,11 +118,11 @@ app.get("/solarlog", async (req, res) => {
 
   try {
 
+    // =========================
+    // MULTI / SINGLE / ALL
+    // =========================
     let cids = req.query.cid;
 
-    // =========================
-    // DEFAULT = TUTTI IMPIANTI
-    // =========================
     if (!cids || cids.trim() === "") {
       cids = Object.keys(PLANTS);
     } else {
@@ -129,7 +136,6 @@ app.get("/solarlog", async (req, res) => {
 
     const results = [];
 
-    // sequenziale stabile (Render-safe)
     for (const cid of cids) {
       results.push(await fetchPlant(browser, cid.trim()));
     }
@@ -166,5 +172,5 @@ app.get("/solarlog", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("SolarLog Stable API running");
+  console.log("SolarLog FINAL STABLE API running");
 });
