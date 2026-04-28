@@ -3,9 +3,6 @@ import { chromium } from "playwright";
 
 const app = express();
 
-// =========================
-// IMPIANTI
-// =========================
 const PLANTS = {
   "24468": "Villetta",
   "24474": "Villetta2",
@@ -17,7 +14,22 @@ const PLANTS = {
 };
 
 // =========================
-// SCRAPER IMPIANTO
+// BROWSER SINGLETON (CRUCIALE)
+// =========================
+let browser;
+
+async function getBrowser() {
+  if (!browser) {
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    });
+  }
+  return browser;
+}
+
+// =========================
+// SCRAPER SAFE (NO MEMORY SPIKE)
 // =========================
 async function fetchPlant(browser, cid) {
 
@@ -27,28 +39,11 @@ async function fetchPlant(browser, cid) {
 
     await page.goto(
       `https://emmest.solarlog-portal.it/sds/module/solarlogweb/Statistik.php?c=${cid}`,
-      { waitUntil: "networkidle" }
+      { waitUntil: "domcontentloaded" }
     );
 
-    // =========================
-    // WAIT INTELLIGENTE SVG READY
-    // =========================
-    await page.waitForFunction(() => {
+    await page.waitForTimeout(3000);
 
-      const svg = document.querySelector("svg");
-      if (!svg) return false;
-
-      const texts = Array.from(svg.querySelectorAll("text"));
-
-      return texts.some(t =>
-        /\d+(\.\d+)?\s*kW/.test(t.textContent || "")
-      );
-
-    }, { timeout: 25000 });
-
-    // =========================
-    // ESTRAZIONE ROBUSTA INVERTER
-    // =========================
     const values = await page.evaluate(() => {
 
       const svg = document.querySelector("svg");
@@ -59,16 +54,11 @@ async function fetchPlant(browser, cid) {
       const out = [];
 
       for (const t of texts) {
+        const txt = t.textContent || "";
 
-        const txt = (t.textContent || "").trim();
-
-        // filtro intelligente: solo inverter labels
-        if (
-          txt.includes("S0-IN") ||
-          txt.toUpperCase().includes("INVERTER")
-        ) {
-          const match = txt.match(/(\d+(\.\d+)?)\s*kW/);
-          if (match) out.push(parseFloat(match[1]));
+        if (txt.includes("S0-IN") || txt.includes("INVERTER")) {
+          const m = txt.match(/(\d+(\.\d+)?)\s*kW/);
+          if (m) out.push(parseFloat(m[1]));
         }
       }
 
@@ -77,34 +67,17 @@ async function fetchPlant(browser, cid) {
 
     await page.close();
 
-    // =========================
-    // VALIDAZIONE
-    // =========================
     const clean = values.filter(v => !isNaN(v));
-
-    if (clean.length < 2) {
-      return {
-        cid,
-        name: PLANTS[cid] || "unknown",
-        error: "not_enough_data",
-        raw: values
-      };
-    }
 
     const lastTwo = clean.slice(-2);
 
-    const inverter = [
-      { id: "A", power: lastTwo[0] },
-      { id: "B", power: lastTwo[1] }
-    ];
-
-    const total = inverter.reduce((a, b) => a + b.power, 0);
-
     return {
       cid,
-      name: PLANTS[cid] || "unknown",
-      inverter,
-      total
+      inverter: [
+        { id: "A", power: lastTwo[0] || 0 },
+        { id: "B", power: lastTwo[1] || 0 }
+      ],
+      total: (lastTwo[0] || 0) + (lastTwo[1] || 0)
     };
 
   } catch (err) {
@@ -119,50 +92,35 @@ async function fetchPlant(browser, cid) {
 }
 
 // =========================
-// API PRINCIPALE
+// API
 // =========================
 app.get("/solarlog", async (req, res) => {
 
-  let browser;
-
   try {
+
+    const browser = await getBrowser();
 
     let cids = req.query.cid;
 
-    // default = tutti impianti
-    if (!cids || cids.trim() === "") {
-      cids = Object.keys(PLANTS);
-    } else {
-      cids = cids.split(",");
-    }
-
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
-    });
+    if (!cids) cids = Object.keys(PLANTS);
+    else cids = cids.split(",");
 
     const results = [];
 
+    // 🔥 IMPORTANT: sequenziale (NO PARALLEL)
     for (const cid of cids) {
       results.push(await fetchPlant(browser, cid.trim()));
     }
 
-    await browser.close();
-
-    const globalTotal = results.reduce((sum, p) => {
-      return sum + (p.total || 0);
-    }, 0);
+    const global_total = results.reduce((a, b) => a + (b.total || 0), 0);
 
     return res.json({
       timestamp: Date.now(),
       plants: results,
-      global_total: globalTotal
+      global_total
     });
 
   } catch (err) {
-
-    if (browser) await browser.close();
-
     return res.json({
       error: "runtime_error",
       message: err.message
@@ -170,11 +128,8 @@ app.get("/solarlog", async (req, res) => {
   }
 });
 
-// =========================
-// START SERVER
-// =========================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("SolarLog FINAL API running");
+  console.log("MEMORY SAFE API RUNNING");
 });
