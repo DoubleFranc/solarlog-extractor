@@ -26,20 +26,23 @@ app.get("/solarlog", async (req, res) => {
       { waitUntil: "networkidle" }
     );
 
-    // 🔥 ASPETTA RENDER COMPLETO SVG + JS
+    // 🔥 aspetta rendering completo SVG
     await page.waitForTimeout(8000);
 
     // =========================
-    // DOM EXTRACTION (QUI STA LA SOLUZIONE)
+    // SVG EXTRACTION DIRETTA
     // =========================
     const result = await page.evaluate(() => {
 
-      const text = document.body.innerText || "";
+      const svgText = document.querySelector("svg")?.innerHTML || "";
 
-      // estrai tutti i numeri kW visibili nel DOM
-      const matches = text.match(/\d+(\.\d+)?\s?kW/g) || [];
+      // 🔥 trova tutti i valori kW nel SVG
+      const matches = svgText.match(/(\d{1,4}\.\d{1,2})\s*kW/g) || [];
 
-      return matches;
+      // pulizia duplicati
+      const unique = [...new Set(matches)];
+
+      return unique;
     });
 
     await browser.close();
@@ -64,5 +67,5 @@ app.get("/solarlog", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("running");
+  console.log("SolarLog extractor running");
 });
