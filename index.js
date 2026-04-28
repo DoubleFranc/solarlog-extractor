@@ -85,14 +85,13 @@ app.get("/solarlog", async (req, res) => {
 
   try {
 
-    const cidParam = req.query.cid;
+  let cids = req.query.cid;
 
-    // =========================
-    // MODALITÀ MULTI o SINGLE
-    // =========================
-    const cids = cidParam
-      ? cidParam.split(",")
-      : Object.keys(PLANTS);
+if (!cids || cids.trim() === "") {
+  cids = Object.keys(PLANTS);
+} else {
+  cids = cids.split(",");
+}
 
     browser = await chromium.launch({
       headless: true,
