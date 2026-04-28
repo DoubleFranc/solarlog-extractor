@@ -26,24 +26,31 @@ app.get("/solarlog", async (req, res) => {
     // intercetta tutte le risposte di rete
     page.on("response", async (response) => {
       try {
-        const url = response.url();
+       const url = response.url();
+const ct = response.headers()["content-type"] || "";
 
-        // filtra chiamate interessanti
-        if (
-          url.includes("php") ||
-          url.includes("json") ||
-          url.includes("data")
-        ) {
-          const text = await response.text();
+// 🔥 intercetta solo chiamate utili reali
+if (
+  ct.includes("json") ||
+  url.includes("ajax") ||
+  url.includes("Get") ||
+  url.includes("Data") ||
+  url.includes("Realtime") ||
+  url.includes("chart")
+) {
+  const text = await response.text();
 
-          // prendi solo roba utile
-          if (text.includes("kW") && text.length < 100000) {
-            responses.push({
-              url,
-              snippet: text.substring(0, 500) // preview utile
-            });
-          }
-        }
+  if (
+    text.includes("kW") ||
+    text.includes("power") ||
+    text.includes("W")
+  ) {
+    responses.push({
+      url,
+      snippet: text.substring(0, 800)
+    });
+  }
+}
       } catch {}
     });
 
