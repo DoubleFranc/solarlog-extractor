@@ -4,7 +4,7 @@ import { chromium } from "playwright";
 const app = express();
 
 // =========================
-// CONFIG IMPIANTI
+// IMPIANTI
 // =========================
 const PLANTS = {
   "24563": "Nord",
@@ -17,7 +17,7 @@ const PLANTS = {
 };
 
 // =========================
-// SCRAPING SINGOLO IMPIANTO
+// SCRAPER SINGOLO IMPIANTO
 // =========================
 async function fetchPlant(browser, cid) {
 
@@ -32,32 +32,54 @@ async function fetchPlant(browser, cid) {
 
     await page.waitForTimeout(8000);
 
+    // =========================
+    // 🔥 ESTRAZIONE CORRETTA (LABEL + VALORE)
+    // =========================
     const values = await page.evaluate(() => {
 
       const svg = document.querySelector("svg");
       if (!svg) return [];
 
-      const text = svg.innerHTML || "";
+      const text = svg.innerHTML;
 
-      const matches = text.match(/(\d+(\.\d+)?)\s*kW/g) || [];
+      // 🔥 prende SOLO pattern inverter reali (S0-IN / INVERTER / ecc.)
+      const regex = /(S0-IN[^<]{0,50}?)(\d{2}:\d{2})[^0-9]*([0-9]+(\.[0-9]+)?)\s*kW/g;
 
-      return matches;
+      const results = [];
+      let match;
+
+      while ((match = regex.exec(text)) !== null) {
+        results.push(parseFloat(match[3]));
+      }
+
+      return results;
     });
 
-    const clean = values
-      .map(v => parseFloat(v))
-      .filter(v => !isNaN(v));
+    await page.close();
+
+    // =========================
+    // PULIZIA DATI
+    // =========================
+    const clean = values.filter(v => !isNaN(v));
+
+    // fallback sicurezza
+    if (clean.length < 2) {
+      return {
+        cid,
+        name: PLANTS[cid] || "unknown",
+        error: "not_enough_data",
+        raw: values
+      };
+    }
 
     const lastTwo = clean.slice(-2);
 
     const inverter = [
-      { id: "A", power: lastTwo[0] || 0 },
-      { id: "B", power: lastTwo[1] || 0 }
+      { id: "A", power: lastTwo[0] },
+      { id: "B", power: lastTwo[1] }
     ];
 
     const total = inverter.reduce((a, b) => a + b.power, 0);
-
-    await page.close();
 
     return {
       cid,
@@ -78,7 +100,7 @@ async function fetchPlant(browser, cid) {
 }
 
 // =========================
-// API ENDPOINT
+// API PRINCIPALE
 // =========================
 app.get("/solarlog", async (req, res) => {
 
@@ -87,7 +109,7 @@ app.get("/solarlog", async (req, res) => {
   try {
 
     // =========================
-    // FIX: DEFAULT = TUTTI IMPIANTI
+    // FIX: DEFAULT = TUTTI GLI IMPIANTI
     // =========================
     let cids = req.query.cid;
 
@@ -104,7 +126,6 @@ app.get("/solarlog", async (req, res) => {
 
     const results = [];
 
-    // sequenziale (più stabile su Render)
     for (const cid of cids) {
       const data = await fetchPlant(browser, cid.trim());
       results.push(data);
@@ -137,10 +158,10 @@ app.get("/solarlog", async (req, res) => {
 });
 
 // =========================
-// START SERVER
+// SERVER START
 // =========================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("SolarLog Multi API running on port " + PORT);
+  console.log("SolarLog API FIXED running on port " + PORT);
 });
