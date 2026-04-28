@@ -22,37 +22,9 @@ app.get("/solarlog", async (req, res) => {
 
     const page = await browser.newPage();
 
-    const networkCalls = [];
-
-    // 🔥 CATTURA TUTTE LE REQUEST REALI
-    page.on("request", request => {
-      networkCalls.push({
-        type: "request",
-        url: request.url()
-      });
-    });
-
-    page.on("response", async response => {
-      try {
-        const url = response.url();
-        const ct = response.headers()["content-type"] || "";
-
-        let text = "";
-
-        try {
-          text = await response.text();
-        } catch {}
-
-        networkCalls.push({
-          type: "response",
-          url,
-          contentType: ct,
-          snippet: text.substring(0, 300)
-        });
-
-      } catch {}
-    });
-
+    // =========================
+    // CARICAMENTO PAGINA
+    // =========================
     await page.goto(
       `https://emmest.solarlog-portal.it/sds/module/solarlogweb/Statistik.php?c=${cid}`,
       { waitUntil: "networkidle" }
@@ -60,22 +32,53 @@ app.get("/solarlog", async (req, res) => {
 
     await page.waitForTimeout(8000);
 
+    // =========================
+    // ESTRAZIONE SVG -> VALORI kW
+    // =========================
+    const values = await page.evaluate(() => {
+
+      const svg = document.querySelector("svg");
+      if (!svg) return [];
+
+      const text = svg.innerHTML || "";
+
+      const matches = text.match(/(\d+(\.\d+)?)\s*kW/g) || [];
+
+      return matches;
+    });
+
     await browser.close();
 
-    // 🔥 FILTRA SOLO URL INTERESSANTI
-    const filtered = networkCalls.filter(c =>
-      c.url.includes("ajax") ||
-      c.url.includes("get") ||
-      c.url.includes("data") ||
-      c.url.includes("chart") ||
-      c.url.includes("realtime") ||
-      c.url.includes("json")
-    );
+    // =========================
+    // PULIZIA DATI
+    // =========================
+    const clean = values
+      .map(v => parseFloat(v))
+      .filter(v => !isNaN(v));
+
+    if (clean.length < 2) {
+      return res.json({
+        plant: cid,
+        error: "not_enough_data",
+        raw: values
+      });
+    }
+
+    // prendi ultimi 2 valori (inverter A/B)
+    const lastTwo = clean.slice(-2);
+
+    const inverter = [
+      { id: "A", power: lastTwo[0] },
+      { id: "B", power: lastTwo[1] }
+    ];
+
+    const total = lastTwo.reduce((a, b) => a + b, 0);
 
     return res.json({
       plant: cid,
-      total_calls: networkCalls.length,
-      interesting_calls: filtered
+      timestamp: Date.now(),
+      inverter,
+      total
     });
 
   } catch (err) {
@@ -89,4 +92,8 @@ app.get("/solarlog", async (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log("running"));
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("SolarLog API running on port " + PORT);
+});
