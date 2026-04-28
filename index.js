@@ -3,28 +3,28 @@ import { chromium } from "playwright";
 
 const app = express();
 
-app.get("/solarlog", async (req, res) => {
+// =========================
+// CONFIG IMPIANTI
+// =========================
+const PLANTS = {
+  "24563": "Nord",
+  "24490": "Centro",
+  "24486": "Sud",
+  "24468": "Villetta",
+  "24474": "Villetta2",
+  "24655": "Vallicelletta",
+  "24669": "Vallicelletta2"
+};
 
-  const cid = req.query.cid;
+// =========================
+// FUNZIONE SCRAPING SINGOLO IMPIANTO
+// =========================
+async function fetchPlant(browser, cid) {
 
-  if (!cid) {
-    return res.json({ error: "missing cid" });
-  }
-
-  let browser;
+  const page = await browser.newPage();
 
   try {
 
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
-    });
-
-    const page = await browser.newPage();
-
-    // =========================
-    // CARICAMENTO PAGINA
-    // =========================
     await page.goto(
       `https://emmest.solarlog-portal.it/sds/module/solarlogweb/Statistik.php?c=${cid}`,
       { waitUntil: "networkidle" }
@@ -32,9 +32,6 @@ app.get("/solarlog", async (req, res) => {
 
     await page.waitForTimeout(8000);
 
-    // =========================
-    // ESTRAZIONE SVG -> VALORI kW
-    // =========================
     const values = await page.evaluate(() => {
 
       const svg = document.querySelector("svg");
@@ -47,38 +44,82 @@ app.get("/solarlog", async (req, res) => {
       return matches;
     });
 
-    await browser.close();
-
-    // =========================
-    // PULIZIA DATI
-    // =========================
     const clean = values
       .map(v => parseFloat(v))
       .filter(v => !isNaN(v));
 
-    if (clean.length < 2) {
-      return res.json({
-        plant: cid,
-        error: "not_enough_data",
-        raw: values
-      });
-    }
-
-    // prendi ultimi 2 valori (inverter A/B)
     const lastTwo = clean.slice(-2);
 
     const inverter = [
-      { id: "A", power: lastTwo[0] },
-      { id: "B", power: lastTwo[1] }
+      { id: "A", power: lastTwo[0] || 0 },
+      { id: "B", power: lastTwo[1] || 0 }
     ];
 
-    const total = lastTwo.reduce((a, b) => a + b, 0);
+    const total = inverter.reduce((a, b) => a + b.power, 0);
 
-    return res.json({
-      plant: cid,
-      timestamp: Date.now(),
+    await page.close();
+
+    return {
+      cid,
+      name: PLANTS[cid] || "unknown",
       inverter,
       total
+    };
+
+  } catch (err) {
+    await page.close();
+
+    return {
+      cid,
+      error: err.message
+    };
+  }
+}
+
+// =========================
+// API ENDPOINT
+// =========================
+app.get("/solarlog", async (req, res) => {
+
+  let browser;
+
+  try {
+
+    const cidParam = req.query.cid;
+
+    // =========================
+    // MODALITÀ MULTI o SINGLE
+    // =========================
+    const cids = cidParam
+      ? cidParam.split(",")
+      : Object.keys(PLANTS);
+
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    });
+
+    const results = [];
+
+    // sequenziale (più stabile su Render)
+    for (const cid of cids) {
+      const data = await fetchPlant(browser, cid.trim());
+      results.push(data);
+    }
+
+    await browser.close();
+
+    // =========================
+    // TOTALE GENERALE
+    // =========================
+    const globalTotal = results.reduce((sum, p) => {
+      return sum + (p.total || 0);
+    }, 0);
+
+    return res.json({
+      timestamp: Date.now(),
+      plants: results,
+      global_total: globalTotal
     });
 
   } catch (err) {
@@ -95,5 +136,5 @@ app.get("/solarlog", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("SolarLog API running on port " + PORT);
+  console.log("Multi SolarLog API running");
 });
